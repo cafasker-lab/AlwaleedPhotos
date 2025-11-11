@@ -1,0 +1,568 @@
+
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ShoppingCart, Image as ImageIcon, Loader2, Plus, Play, Filter, SortAsc, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { useLanguage } from "../components/LanguageContext";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+
+export default function Gallery() {
+  const { t } = useLanguage();
+  const queryClient = useQueryClient();
+  // Removed selectedPhoto, selectedSize, isAddingToCart states as per changes
+  // const [selectedPhoto, setSelectedPhoto] = useState(null);
+  // const [selectedSize, setSelectedSize] = useState("8x10");
+  // const [isAddingToCart, setIsAddingToCart] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  
+  // New state for filtering, sorting, and slideshow
+  const [filterType, setFilterType] = useState("all");
+  const [sortBy, setSortBy] = useState("newest");
+  const [slideshowOpen, setSlideshowOpen] = useState(false);
+  const [slideshowIndex, setSlideshowIndex] = useState(0);
+
+  useEffect(() => {
+    let mounted = true; // Flag to track if the component is mounted
+    
+    const fetchUser = async () => {
+      try {
+        const user = await base44.auth.me();
+        if (mounted) { // Only update state if component is still mounted
+          setCurrentUser(user);
+        }
+      } catch (error) {
+        console.error("Error fetching user:", error);
+      }
+    };
+    fetchUser();
+    
+    return () => {
+      mounted = false; // Set mounted to false when the component unmounts
+    };
+  }, []);
+
+  const { data: photos = [], isLoading } = useQuery({
+    queryKey: ['photos', currentUser?.email],
+    queryFn: async () => {
+      if (!currentUser?.email) return [];
+      return base44.entities.Photo.filter({ 
+        status: "published",
+        user: currentUser.email 
+      }, "-created_date");
+    },
+    enabled: !!currentUser?.email,
+    initialData: [],
+  });
+
+  const addToCartMutation = useMutation({
+    mutationFn: async (cartData) => base44.entities.CartItem.create(cartData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cartItems'] });
+      // Removed setSelectedPhoto(null) and setSelectedSize("8x10") as per changes
+    },
+  });
+
+  // Filter and sort photos
+  const filteredAndSortedPhotos = React.useMemo(() => {
+    let result = [...photos];
+    
+    // Apply filter
+    if (filterType !== "all") {
+      result = result.filter(photo => 
+        photo.ai_tool === filterType // Changed from photo.editing_settings?.ai_style
+      );
+    }
+    
+    // Apply sort
+    switch (sortBy) {
+      case "newest":
+        result.sort((a, b) => new Date(b.created_date) - new Date(a.created_date));
+        break;
+      case "oldest":
+        result.sort((a, b) => new Date(a.created_date) - new Date(b.created_date)); // Fixed sorting bug here
+        break;
+      case "alphabetical":
+        result.sort((a, b) => a.title.localeCompare(b.title));
+        break;
+      default:
+        break;
+    }
+    
+    return result;
+  }, [photos, filterType, sortBy]);
+
+  const filterOptions = [
+    { value: "all", label: "All Photos", icon: ImageIcon },
+    { value: "visa-photo", label: t('visaPhoto'), icon: ImageIcon },
+    { value: "absher-photo", label: t('absherPhoto'), icon: ImageIcon },
+    { value: "saudi-look", label: t('saudiLook'), icon: ImageIcon },
+    { value: "baby-photo", label: t('babyPhoto'), icon: ImageIcon },
+  ];
+
+  // Modified handleAddToCart to accept photo directly and remove isAddingToCart state
+  const handleAddToCart = async (photo) => {
+    if (!photo || !currentUser) return;
+
+    // Use the price from the saved photo
+    const price = photo.price || 45; // Default to A5 portrait price if not set
+
+    const cartData = {
+      user: currentUser.email,
+      photo_id: photo.id,
+      photo_title: photo.title,
+      photo_url: photo.edited_url,
+      print_size: photo.print_size || "A5",
+      quantity: 1,
+      price_per_item: price,
+      total_price: price,
+      editing_settings: photo.editing_settings
+    };
+
+    await addToCartMutation.mutateAsync(cartData);
+  };
+
+  // Removed openSizeDialog as per changes
+  // const openSizeDialog = (photo) => {
+  //   setSelectedPhoto(photo);
+  //   setSelectedSize(photo.print_size || "8x10");
+  // };
+
+  const openSlideshow = (index) => {
+    setSlideshowIndex(index);
+    setSlideshowOpen(true);
+  };
+
+  const nextSlide = () => {
+    setSlideshowIndex((prev) => (prev + 1) % filteredAndSortedPhotos.length);
+  };
+
+  const prevSlide = () => {
+    setSlideshowIndex((prev) => (prev - 1 + filteredAndSortedPhotos.length) % filteredAndSortedPhotos.length);
+  };
+
+  useEffect(() => {
+    if (!slideshowOpen) return; // Only attach event listener if slideshow is open
+    
+    const handleKeyDown = (e) => {
+      if (e.key === "ArrowRight") nextSlide();
+      if (e.key === "ArrowLeft") prevSlide();
+      if (e.key === "Escape") setSlideshowOpen(false);
+    };
+    
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [slideshowOpen, filteredAndSortedPhotos.length, nextSlide, prevSlide]); // Add dependencies
+
+  if (isLoading || !currentUser) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center">
+        <Loader2 className="w-12 h-12 animate-spin text-black" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#F5F5F7] py-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="mb-8 sm:mb-12">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-black mb-2">
+                {t('yourGallery')}
+              </h1>
+              <p className="text-lg sm:text-xl text-gray-600 font-light">
+                {filteredAndSortedPhotos.length} {filteredAndSortedPhotos.length === 1 ? t('photo') : t('photos')} {t('photosReady')}
+              </p>
+            </div>
+            <Link to={createPageUrl("EditPhoto")}>
+              <Button className="bg-black text-white hover:bg-gray-900 rounded-xl px-6 py-3 font-medium shadow-lg whitespace-nowrap">
+                <Plus className="w-5 h-5 mr-2" />
+                {t('editNewPhoto')}
+              </Button>
+            </Link>
+          </div>
+        </div>
+
+        {photos.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center py-20"
+          >
+            <div className="w-24 h-24 bg-black rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <ImageIcon className="w-12 h-12 text-white" />
+            </div>
+            <h3 className="text-2xl font-semibold text-black mb-3">
+              {t('noPhotosYet')}
+            </h3>
+            <p className="text-gray-600 mb-8">
+              {t('noPhotosDesc')}
+            </p>
+            <Link to={createPageUrl("EditPhoto")}>
+              <Button className="bg-black text-white hover:bg-gray-900 rounded-xl px-8 py-4 text-lg font-medium">
+                {t('editFirstPhoto')}
+              </Button>
+            </Link>
+          </motion.div>
+        ) : (
+          <>
+            {/* Filters and Sort Controls */}
+            <div className="mb-6 sm:mb-8 bg-white rounded-2xl shadow-lg p-4 sm:p-6">
+              <div className="flex flex-col gap-4 sm:gap-6">
+                {/* Filter Buttons */}
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Filter className="w-4 h-4 sm:w-5 sm:h-5 text-gray-700" />
+                    <h3 className="text-xs sm:text-sm font-semibold text-gray-700 uppercase tracking-wide">
+                      {t('filterByType') || 'Filter by Type'}
+                    </h3>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {filterOptions.map((option) => (
+                      <Button
+                        key={option.value}
+                        onClick={() => setFilterType(option.value)}
+                        variant={filterType === option.value ? "default" : "outline"}
+                        className={`rounded-xl text-xs sm:text-sm px-3 py-2 sm:px-4 sm:py-2 ${
+                          filterType === option.value
+                            ? "bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700"
+                            : "border-2 border-gray-300 text-gray-700 hover:border-black hover:bg-gray-50"
+                        }`}
+                      >
+                        <option.icon className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
+                        <span className="hidden xs:inline">{option.label}</span>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sort and Slideshow Row */}
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+                  {/* Sort Dropdown */}
+                  <div className="flex-1 sm:max-w-xs">
+                    <div className="flex items-center gap-2 mb-2">
+                      <SortAsc className="w-4 h-4 sm:w-5 sm:h-5 text-gray-700" />
+                      <h3 className="text-xs sm:text-sm font-semibold text-gray-700 uppercase tracking-wide">
+                        {t('sortBy') || 'Sort By'}
+                      </h3>
+                    </div>
+                    <Select value={sortBy} onValueChange={setSortBy}>
+                      <SelectTrigger className="rounded-xl border-2 border-gray-300 h-10 sm:h-11 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="newest">Newest First</SelectItem>
+                        <SelectItem value="oldest">Oldest First</SelectItem>
+                        <SelectItem value="alphabetical">A-Z (Title)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Slideshow Button */}
+                  {filteredAndSortedPhotos.length > 0 && (
+                    <div className="flex items-end">
+                      <Button
+                        onClick={() => openSlideshow(0)}
+                        className="w-full sm:w-auto bg-black text-white hover:bg-gray-900 rounded-xl px-4 sm:px-6 py-2.5 sm:py-3 h-10 sm:h-11 font-medium text-sm"
+                      >
+                        <Play className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
+                        Slideshow
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Photos Grid */}
+            {filteredAndSortedPhotos.length === 0 ? (
+              <Card className="p-12 bg-white border-none shadow-lg rounded-2xl text-center">
+                <Filter className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-black mb-2">
+                  No photos match your filters
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Try adjusting your filter settings
+                </p>
+                <Button
+                  onClick={() => setFilterType("all")}
+                  variant="outline"
+                  className="rounded-xl"
+                >
+                  Clear Filters
+                </Button>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                <AnimatePresence>
+                  {filteredAndSortedPhotos.map((photo, index) => (
+                    <motion.div
+                      key={photo.id}
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      transition={{ duration: 0.3, delay: index * 0.05 }}
+                      layout
+                    >
+                      <Card className="overflow-hidden bg-white border-none shadow-lg rounded-2xl hover:shadow-2xl smooth-transition group">
+                        <div 
+                          className="relative aspect-square bg-[#1A1A1A] overflow-hidden cursor-pointer"
+                          onClick={() => openSlideshow(index)}
+                        >
+                          <img
+                            src={photo.edited_url}
+                            alt={photo.title}
+                            className="w-full h-full object-cover group-hover:scale-105 smooth-transition"
+                          />
+                          {photo.ai_tool && (
+                            <Badge className="absolute top-2 sm:top-3 left-2 sm:left-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white border-none text-xs">
+                              {photo.ai_tool === "visa-photo" && t('visaPhoto')}
+                              {photo.ai_tool === "saudi-look" && t('saudiLook')}
+                              {photo.ai_tool === "baby-photo" && t('babyPhoto')}
+                            </Badge>
+                          )}
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 smooth-transition flex items-center justify-center">
+                            <Play className="w-12 h-12 sm:w-16 sm:h-16 text-white opacity-0 group-hover:opacity-100 smooth-transition" />
+                          </div>
+                        </div>
+                        <div className="p-4 sm:p-6">
+                          <h3 className="text-base sm:text-lg font-semibold text-black mb-2 truncate">
+                            {photo.title}
+                          </h3>
+                          <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">
+                            {photo.print_size} • {photo.price} {t('currency') || 'SAR'}
+                          </p>
+                          <Button
+                            onClick={() => handleAddToCart(photo)}
+                            disabled={addToCartMutation.isPending}
+                            className="w-full bg-black text-white hover:bg-gray-900 rounded-lg py-2.5 sm:py-3 font-medium smooth-transition text-sm"
+                          >
+                            {addToCartMutation.isPending ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                {t('adding')}
+                              </>
+                            ) : (
+                              <>
+                                <ShoppingCart className="w-4 h-4 mr-2" />
+                                {t('addToCart')}
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </Card>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Removed Size Selection Dialog as per changes */}
+      {/*
+      <Dialog open={!!selectedPhoto} onOpenChange={() => setSelectedPhoto(null)}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">{t('selectPrintSize')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {selectedPhoto && (
+              <div className="aspect-square rounded-xl overflow-hidden bg-[#1A1A1A]">
+                <img
+                  src={selectedPhoto.edited_url}
+                  alt={selectedPhoto.title}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            )}
+            <div>
+              <label className="text-sm font-medium mb-2 block">{t('printSize')}</label>
+              <Select value={selectedSize} onValueChange={setSelectedSize}>
+                <SelectTrigger className="rounded-lg border-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="8x10">8" × 10" - $29.99</SelectItem>
+                  <SelectItem value="11x14">11" × 14" - $49.99</SelectItem>
+                  <SelectItem value="16x20">16" × 20" - $79.99</SelectItem>
+                  <SelectItem value="24x36">24" × 36" - $129.99</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSelectedPhoto(null)}
+              className="rounded-lg"
+            >
+              {t('cancel')}
+            </Button>
+            <Button
+              onClick={handleAddToCart}
+              disabled={isAddingToCart}
+              className="bg-black text-white hover:bg-gray-900 rounded-lg"
+            >
+              {isAddingToCart ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {t('adding')}
+                </>
+              ) : (
+                <>
+                  <ShoppingCart className="w-4 h-4 mr-2" />
+                  {t('addToCart')}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      */}
+
+      {/* Slideshow Dialog */}
+      <Dialog open={slideshowOpen} onOpenChange={setSlideshowOpen}>
+        <DialogContent className="max-w-7xl h-[90vh] p-0 bg-black border-none overflow-hidden">
+          <div className="relative w-full h-full flex items-center justify-center">
+            {/* Close Button */}
+            <Button
+              onClick={() => setSlideshowOpen(false)}
+              variant="ghost"
+              size="icon"
+              className="absolute top-4 right-4 z-50 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm"
+            >
+              <X className="w-6 h-6" />
+            </Button>
+
+            {/* Image Counter */}
+            <div className="absolute top-4 left-4 z-50 bg-white/10 backdrop-blur-sm text-white px-4 py-2 rounded-full text-sm font-medium">
+              {slideshowIndex + 1} / {filteredAndSortedPhotos.length}
+            </div>
+
+            {/* Main Image */}
+            <AnimatePresence mode="wait">
+              {filteredAndSortedPhotos[slideshowIndex] && (
+                <motion.div
+                  key={slideshowIndex}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.3 }}
+                  className="w-full h-full flex flex-col items-center justify-center p-8"
+                >
+                  <img
+                    src={filteredAndSortedPhotos[slideshowIndex].edited_url}
+                    alt={filteredAndSortedPhotos[slideshowIndex].title}
+                    className="max-w-full max-h-[calc(100vh-200px)] object-contain rounded-xl"
+                  />
+                  <div className="mt-6 text-center">
+                    <h3 className="text-2xl font-bold text-white mb-2">
+                      {filteredAndSortedPhotos[slideshowIndex].title}
+                    </h3>
+                    {filteredAndSortedPhotos[slideshowIndex].ai_tool && ( // Changed from .editing_settings?.ai_style
+                      <Badge className="bg-gradient-to-r from-blue-600 to-purple-600 text-white border-none">
+                        {filteredAndSortedPhotos[slideshowIndex].ai_tool === "visa-photo" && t('visaPhoto')}
+                        {filteredAndSortedPhotos[slideshowIndex].ai_tool === "absher-photo" && t('absherPhoto')}
+                        {filteredAndSortedPhotos[slideshowIndex].ai_tool === "saudi-look" && t('saudiLook')}
+                        {filteredAndSortedPhotos[slideshowIndex].ai_tool === "baby-photo" && t('babyPhoto')}
+                      </Badge>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Navigation Buttons */}
+            {filteredAndSortedPhotos.length > 1 && (
+              <>
+                <Button
+                  onClick={prevSlide}
+                  variant="ghost"
+                  size="icon"
+                  className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </Button>
+                <Button
+                  onClick={nextSlide}
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </Button>
+              </>
+            )}
+
+            {/* Action Buttons */}
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3">
+              <Button
+                onClick={() => {
+                  handleAddToCart(filteredAndSortedPhotos[slideshowIndex]);
+                }}
+                disabled={addToCartMutation.isPending}
+                className="bg-white text-black hover:bg-gray-100 rounded-xl px-6 py-3 font-medium shadow-xl"
+              >
+                {addToCartMutation.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {t('adding')}
+                  </>
+                ) : (
+                  <>
+                    <ShoppingCart className="w-4 h-4 mr-2" />
+                    {t('addToCart')}
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Thumbnail Strip */}
+            <div className="absolute bottom-20 left-0 right-0 overflow-x-auto px-8">
+              <div className="flex gap-2 justify-center min-w-max">
+                {filteredAndSortedPhotos.map((photo, index) => (
+                  <button
+                    key={photo.id}
+                    onClick={() => setSlideshowIndex(index)}
+                    className={`w-16 h-16 rounded-lg overflow-hidden border-2 smooth-transition ${
+                      index === slideshowIndex
+                        ? "border-white scale-110"
+                        : "border-white/30 opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    <img
+                      src={photo.edited_url}
+                      alt={photo.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
