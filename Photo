@@ -1,0 +1,87 @@
+{
+  "name": "Photo",
+  "type": "object",
+  "properties": {
+    "user": {
+      "type": "string",
+      "description": "User email who owns this photo"
+    },
+    "title": {
+      "type": "string",
+      "description": "Title of the photo"
+    },
+    "ai_tool": {
+      "type": "string",
+      "enum": [
+        "visa-photo",
+        "absher-photo",
+        "saudi-look",
+        "baby-photo"
+      ],
+      "description": "AI tool used: Visa Photo, Absher Photo, Saudi Look, or Baby Photo"
+    },
+    "original_url": {
+      "type": "string",
+      "description": "URL of the original uploaded photo"
+    },
+    "edited_url": {
+      "type": "string",
+      "description": "URL of the AI-edited photo"
+    },
+    "thumbnail_url": {
+      "type": "string",
+      "description": "Thumbnail URL for gallery display"
+    },
+    "editing_settings": {
+      "type": "object",
+      "description": "Detailed editing settings and options selected",
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "id",
+            "portrait"
+          ],
+          "description": "Photo category (ID/Visa or Portrait)"
+        },
+        "size": {
+          "type": "string",
+          "description": "Selected print size"
+        },
+        "quantity": {
+          "type": "number",
+          "description": "Quantity selected"
+        },
+        "addFrame": {
+          "type": "boolean",
+          "description": "Whether frame was added (portrait only)"
+        },
+        "extraPrintSets": {
+          "type": "number",
+          "description": "Number of extra print sets (ID photos only)"
+        }
+      }
+    },
+    "price": {
+      "type": "number",
+      "description": "Total price for the photo with selected options"
+    },
+    "print_size": {
+      "type": "string",
+      "description": "Print size selected"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "published",
+        "ordered"
+      ],
+      "default": "draft"
+    }
+  },
+  "required": [
+    "title",
+    "user"
+  ]
+}
